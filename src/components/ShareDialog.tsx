@@ -1,10 +1,9 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Globe, Link as LinkIcon, Lock, Check } from "lucide-react";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { api } from "@/lib/api";
 import { ProjectMember, ProjectRole } from "@/lib/types";
 import { useToast } from "@/hooks/use-toast";
@@ -23,7 +22,9 @@ export function ShareDialog({ projectId, trigger, open, onOpenChange }: ShareDia
     const [inviteEmail, setInviteEmail] = useState("");
     const [inviteRole, setInviteRole] = useState<ProjectRole>("EDITOR");
     const [loading, setLoading] = useState(false);
+    const [loadingMembers, setLoadingMembers] = useState(false);
     const [internalOpen, setInternalOpen] = useState(false);
+    const [membersLoaded, setMembersLoaded] = useState(false);
 
     // Use controlled open state if provided, otherwise use internal state
     const isOpen = open !== undefined ? open : internalOpen;
@@ -35,19 +36,26 @@ export function ShareDialog({ projectId, trigger, open, onOpenChange }: ShareDia
         }
     };
 
-    useEffect(() => {
-        if (isOpen) {
-            loadMembers();
-        }
-    }, [isOpen, projectId]);
-
     const loadMembers = async () => {
+        setLoadingMembers(true);
         try {
+            console.log("Loading members for project:", projectId);
             const data = await api.getProjectMembers(projectId);
-            setMembers(data);
+            console.log("Members loaded:", data);
+            setMembers(data || []);
+            setMembersLoaded(true);
         } catch (error) {
-            // Fail silently or show placeholder if valid "mock" experience is needed
-            console.error("Failed to load members", error);
+            console.error("Failed to load members:", error);
+            // Show error but keep dialog open
+            toast({ 
+                title: "Error", 
+                description: error instanceof Error ? error.message : "Failed to load members.",
+                variant: "destructive" 
+            });
+            // Keep the dialog visible even on error
+            setMembersLoaded(true);
+        } finally {
+            setLoadingMembers(false);
         }
     };
 
@@ -70,7 +78,7 @@ export function ShareDialog({ projectId, trigger, open, onOpenChange }: ShareDia
     const handleRoleChange = async (userId: number, newRole: ProjectRole) => {
         try {
             await api.updateMemberRole(projectId, userId, newRole);
-            setMembers(members.map(m => m.userId === userId ? { ...m, role: newRole } : m));
+            setMembers(members.map(m => m.userId === userId ? { ...m, projectRole: newRole } : m));
             toast({ title: "Role updated" });
         } catch (error) {
             toast({ title: "Error", description: "Failed to update role.", variant: "destructive" });
@@ -128,57 +136,90 @@ export function ShareDialog({ projectId, trigger, open, onOpenChange }: ShareDia
 
                     {/* Members List */}
                     <div className="space-y-4">
-                        <h4 className="text-sm font-medium text-muted-foreground">People with access</h4>
-
-                        <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
-                            {members.length === 0 && (
-                                <div className="flex items-center gap-3 p-2 rounded-lg bg-muted/30">
-                                    <Avatar className="h-9 w-9">
-                                        <AvatarFallback>ME</AvatarFallback>
-                                    </Avatar>
-                                    <div className="flex-1 text-sm">
-                                        <div className="font-medium">You</div>
-                                        <div className="text-xs text-muted-foreground">Owner</div>
-                                    </div>
-                                    <span className="text-xs text-muted-foreground px-2">Owner</span>
-                                </div>
+                        <div className="flex items-center justify-between">
+                            <h4 className="text-sm font-medium text-muted-foreground">People with access</h4>
+                            {!membersLoaded && (
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-6 text-xs"
+                                    onClick={loadMembers}
+                                    disabled={loadingMembers}
+                                >
+                                    {loadingMembers ? "Loading..." : "Load"}
+                                </Button>
                             )}
-
-                            {members.map(member => (
-                                <div key={member.userId} className="flex items-center gap-3 p-2 rounded-lg hover:bg-muted/50 transition-colors">
-                                    <Avatar className="h-9 w-9">
-                                        <AvatarFallback className="text-xs font-medium">
-                                            {member.name ? member.name.charAt(0).toUpperCase() : member.username.slice(0, 2).toUpperCase()}
-                                        </AvatarFallback>
-                                    </Avatar>
-                                    <div className="flex-1 min-w-0 text-sm">
-                                        <div className="font-medium truncate">{member.name || member.username}</div>
-                                        <div className="text-xs text-muted-foreground truncate">{member.username}</div>
-                                    </div>
-
-                                    {member.role === 'OWNER' ? (
-                                        <span className="text-xs text-muted-foreground px-2 whitespace-nowrap">Owner</span>
-                                    ) : (
-                                        <Select
-                                            defaultValue={member.role}
-                                            onValueChange={(val) => {
-                                                if (val === 'REMOVE') handleRemoveMember(member.userId);
-                                                else handleRoleChange(member.userId, val as ProjectRole);
-                                            }}
-                                        >
-                                            <SelectTrigger className="h-8 w-[100px] text-xs border-none bg-transparent hover:bg-muted focus:ring-1 shadow-none">
-                                                <SelectValue />
-                                            </SelectTrigger>
-                                            <SelectContent align="end">
-                                                <SelectItem value="EDITOR">Can edit</SelectItem>
-                                                <SelectItem value="VIEWER">Can view</SelectItem>
-                                                <SelectItem value="REMOVE" className="text-destructive focus:text-destructive">Remove</SelectItem>
-                                            </SelectContent>
-                                        </Select>
-                                    )}
-                                </div>
-                            ))}
                         </div>
+
+                        {!membersLoaded && !loadingMembers ? (
+                            <div className="text-sm text-muted-foreground p-3 rounded-lg bg-muted/30">
+                                Click "Load" to see who has access to this project.
+                            </div>
+                        ) : (
+                            <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
+                                {(!members || members.length === 0) && (
+                                    <div className="flex items-center gap-3 p-2 rounded-lg bg-muted/30">
+                                        <Avatar className="h-9 w-9">
+                                            <AvatarFallback>ME</AvatarFallback>
+                                        </Avatar>
+                                        <div className="flex-1 text-sm">
+                                            <div className="font-medium">You</div>
+                                            <div className="text-xs text-muted-foreground">Owner</div>
+                                        </div>
+                                        <span className="text-xs text-muted-foreground px-2">Owner</span>
+                                    </div>
+                                )}
+
+                                {Array.isArray(members) && members.map((member) => {
+                                    try {
+                                        const displayName = member?.name || member?.username || "You";
+                                        const displayInitial = displayName ? displayName.charAt(0).toUpperCase() : "?";
+                                        const role = member?.projectRole || "VIEWER";
+                                        
+                                        return (
+                                            <div key={member?.userId} className="flex items-center gap-3 p-2 rounded-lg hover:bg-muted/50 transition-colors">
+                                                <Avatar className="h-9 w-9">
+                                                    <AvatarFallback className="text-xs font-medium">
+                                                        {displayInitial}
+                                                    </AvatarFallback>
+                                                </Avatar>
+                                                <div className="flex-1 min-w-0 text-sm">
+                                                    <div className="font-medium truncate">{displayName}</div>
+                                                    <div className="text-xs text-muted-foreground truncate">{member?.username || "Owner"}</div>
+                                                </div>
+
+                                                {role === 'OWNER' ? (
+                                                    <span className="text-xs text-muted-foreground px-2 whitespace-nowrap">Owner</span>
+                                                ) : (
+                                                    <Select
+                                                        defaultValue={role}
+                                                        onValueChange={(val) => {
+                                                            if (val === 'REMOVE') {
+                                                                if (member?.userId) handleRemoveMember(member.userId);
+                                                            } else {
+                                                                if (member?.userId) handleRoleChange(member.userId, val as ProjectRole);
+                                                            }
+                                                        }}
+                                                    >
+                                                        <SelectTrigger className="h-8 w-[100px] text-xs border-none bg-transparent hover:bg-muted focus:ring-1 shadow-none">
+                                                            <SelectValue />
+                                                        </SelectTrigger>
+                                                        <SelectContent align="end">
+                                                            <SelectItem value="EDITOR">Can edit</SelectItem>
+                                                            <SelectItem value="VIEWER">Can view</SelectItem>
+                                                            <SelectItem value="REMOVE" className="text-destructive focus:text-destructive">Remove</SelectItem>
+                                                        </SelectContent>
+                                                    </Select>
+                                                )}
+                                            </div>
+                                        );
+                                    } catch (err) {
+                                        console.error("Error rendering member:", member, err);
+                                        return null;
+                                    }
+                                })}
+                            </div>
+                        )}
                     </div>
                 </div>
             </DialogContent>

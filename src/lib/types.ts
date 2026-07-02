@@ -79,10 +79,10 @@ export interface ProjectRequest {
 export type ProjectRole = 'OWNER' | 'EDITOR' | 'VIEWER';
 
 export interface ProjectMember {
-  userId: number; // Changed to number based on schema
-  username: string; // The email/username
-  name?: string;
-  role: ProjectRole;
+  userId: number;
+  username: string | null;
+  name: string | null;
+  projectRole: ProjectRole;
   invitedAt?: string;
 }
 
